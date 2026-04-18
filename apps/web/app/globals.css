@@ -11,6 +11,9 @@
   --primary-card: #e3e3e3;
   /* Same as Tailwind default `neutral-300` (interactive hover on light surfaces) */
   --primary-card-hover: #d4d4d4;
+  /* Difficulty pills (light theme; see AGENTS.md) */
+  --rating-okay: oklch(0.72 0.09 245);
+  --rating-easy: oklch(0.8 0.11 150);
 
   --background: var(--primary-background);
   --foreground: var(--primary-font);
@@ -51,6 +54,8 @@
   --color-primary-background: var(--primary-background);
   --color-primary-card: var(--primary-card);
   --color-primary-card-hover: var(--primary-card-hover);
+  --color-rating-okay: var(--rating-okay);
+  --color-rating-easy: var(--rating-easy);
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --font-sans: var(--font-roboto);
@@ -129,6 +134,70 @@
   --sidebar-accent-foreground: oklch(0.985 0 0);
   --sidebar-border: oklch(1 0 0 / 10%);
   --sidebar-ring: oklch(0.556 0 0);
+}
+
+@layer utilities {
+  @keyframes flash-card-swap {
+    from {
+      opacity: 0.65;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+  .animate-flash-card-swap {
+    animation: flash-card-swap 0.28s ease-out;
+  }
+
+  @keyframes answer-shake {
+    0%,
+    100% {
+      transform: translateX(0);
+    }
+    20%,
+    60% {
+      transform: translateX(-6px);
+    }
+    40%,
+    80% {
+      transform: translateX(6px);
+    }
+  }
+  .animate-answer-shake {
+    animation: answer-shake 0.45s ease-out;
+  }
+
+  @keyframes answer-correct-pop {
+    0% {
+      transform: scale(0.97);
+      opacity: 0.85;
+    }
+    55% {
+      transform: scale(1.02);
+      opacity: 1;
+    }
+    100% {
+      transform: scale(1);
+      opacity: 1;
+    }
+  }
+  .animate-answer-correct-pop {
+    animation: answer-correct-pop 0.45s ease-out;
+  }
+
+  @keyframes answer-feedback-in {
+    from {
+      opacity: 0;
+      transform: translateY(6px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+  .animate-answer-feedback-in {
+    animation: answer-feedback-in 0.35s ease-out;
+  }
 }
 
 @layer base {
