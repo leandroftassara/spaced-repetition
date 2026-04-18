@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { motion } from "framer-motion";
 import { ChevronLeft, ChevronRight, MoveLeft } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -175,11 +176,14 @@ function FlashCardFace({
   slot,
   selectedOption,
   onSelectOption,
+  positioned = true,
 }: {
   question: FlashQuestion;
   slot: Slot;
   selectedOption: number | null;
   onSelectOption: (index: number) => void;
+  /** When false, parent handles absolute 3D placement (e.g. motion wrappers). */
+  positioned?: boolean;
 }) {
   const isCenter = slot === "center";
 
@@ -187,9 +191,10 @@ function FlashCardFace({
     <Card
       className={cn(
         "gap-5 py-8 px-1.5 bg-primary-card text-primary-font shadow-lg ring-primary-font/10",
+        !positioned && "relative w-full max-w-none",
         !isCenter && "pointer-events-none select-none",
       )}
-      style={slotWrapperStyle(slot)}
+      style={positioned ? slotWrapperStyle(slot) : undefined}
       {...(!isCenter ? { inert: true } : {})}
     >
       <CardHeader className="flex flex-row items-center justify-between gap-2 px-5">
@@ -229,12 +234,17 @@ export function HomeExperience() {
     typeof setTimeout
   > | null>(null);
 
+  const [carouselDirection, setCarouselDirection] = React.useState<0 | 1 | -1>(
+    0,
+  );
+
   const resetGame = React.useCallback(() => {
     if (completeDialogTimerRef.current != null) {
       clearTimeout(completeDialogTimerRef.current);
       completeDialogTimerRef.current = null;
     }
     setCompleteDialogOpen(false);
+    setCarouselDirection(0);
     setSelectedByCard({});
     setCurrentIndex(0);
   }, []);
@@ -257,6 +267,7 @@ export function HomeExperience() {
   );
 
   const goPrev = React.useCallback(() => {
+    setCarouselDirection(-1);
     setCurrentIndex((i) => (i <= 0 ? 0 : i - 1));
   }, []);
 
@@ -271,6 +282,7 @@ export function HomeExperience() {
       setCompleteDialogOpen(true);
       return;
     }
+    setCarouselDirection(1);
     setCurrentIndex((i) => (i + 1) % n);
   }, [deckComplete, n, selectedOption]);
 
@@ -406,24 +418,81 @@ export function HomeExperience() {
 
             <div className="relative h-[min(70vh,520px)] w-full min-w-0 flex-1 perspective-[1000px]">
               <div className="relative h-full w-full">
-                <FlashCardFace
-                  question={leftQuestion}
-                  slot="left"
-                  selectedOption={leftSelected}
-                  onSelectOption={() => {}}
-                />
-                <FlashCardFace
-                  question={centerQuestion}
-                  slot="center"
-                  selectedOption={selectedOption}
-                  onSelectOption={setSelectedForCurrent}
-                />
-                <FlashCardFace
-                  question={rightQuestion}
-                  slot="right"
-                  selectedOption={rightSelected}
-                  onSelectOption={() => {}}
-                />
+                <motion.div
+                  key={leftQuestion.id}
+                  style={slotWrapperStyle("left")}
+                  initial={{ opacity: 0.35, filter: "blur(4px)" }}
+                  animate={{ opacity: 0.55, filter: "blur(2px)" }}
+                  transition={{
+                    type: "spring",
+                    stiffness: 420,
+                    damping: 38,
+                  }}
+                >
+                  <FlashCardFace
+                    question={leftQuestion}
+                    slot="left"
+                    positioned={false}
+                    selectedOption={leftSelected}
+                    onSelectOption={() => {}}
+                  />
+                </motion.div>
+                <div style={slotWrapperStyle("center")}>
+                  <motion.div
+                    key={currentIndex}
+                    className="w-full"
+                    initial={
+                      carouselDirection === 0
+                        ? false
+                        : {
+                            x: carouselDirection * 88,
+                            opacity: 0.62,
+                            rotateY: carouselDirection * -18,
+                            scale: 0.93,
+                          }
+                    }
+                    animate={{
+                      x: 0,
+                      opacity: 1,
+                      rotateY: 0,
+                      scale: 1,
+                    }}
+                    transition={{
+                      type: "spring",
+                      stiffness: 280,
+                      damping: 32,
+                      mass: 0.85,
+                    }}
+                    style={{ transformStyle: "preserve-3d" }}
+                  >
+                    <FlashCardFace
+                      question={centerQuestion}
+                      slot="center"
+                      positioned={false}
+                      selectedOption={selectedOption}
+                      onSelectOption={setSelectedForCurrent}
+                    />
+                  </motion.div>
+                </div>
+                <motion.div
+                  key={rightQuestion.id}
+                  style={slotWrapperStyle("right")}
+                  initial={{ opacity: 0.35, filter: "blur(4px)" }}
+                  animate={{ opacity: 0.55, filter: "blur(2px)" }}
+                  transition={{
+                    type: "spring",
+                    stiffness: 420,
+                    damping: 38,
+                  }}
+                >
+                  <FlashCardFace
+                    question={rightQuestion}
+                    slot="right"
+                    positioned={false}
+                    selectedOption={rightSelected}
+                    onSelectOption={() => {}}
+                  />
+                </motion.div>
               </div>
             </div>
 
