@@ -364,28 +364,30 @@ export function HomeExperience() {
 
   return (
     <>
-      <Dialog open={completeDialogOpen}>
-        <DialogContent
-          className="flex max-w-[min(100%-2rem,17.5rem)] min-h-[300px] flex-col items-center justify-between gap-0 border-0 bg-primary-background px-6 py-8 text-center text-primary-font ring-0 sm:max-w-xs"
-          showCloseButton={false}
-        >
-          <DialogHeader className="items-center gap-3 text-center">
-            <DialogTitle className="font-display text-lg font-semibold leading-snug tracking-wide text-primary-font uppercase">
-              All cards finished
-            </DialogTitle>
-            <DialogDescription className="font-body mt-6 text-base leading-relaxed text-primary-font/80">
-              You&apos;ve answered every card in this session.
-            </DialogDescription>
-          </DialogHeader>
-          <Button
-            type="button"
-            className="w-full h-10 rounded-full border-0 bg-primary-card font-display text-sm font-semibold uppercase tracking-wide text-primary-font shadow-none hover:bg-primary-card-hover focus-visible:ring-primary-font/25"
-            onClick={returnToHomeFromComplete}
+      {completeDialogOpen ? (
+        <Dialog open>
+          <DialogContent
+            className="flex max-w-[min(100%-2rem,17.5rem)] min-h-[300px] flex-col items-center justify-between gap-0 border-0 bg-primary-background px-6 py-8 text-center text-primary-font ring-0 sm:max-w-xs"
+            showCloseButton={false}
           >
-            Return home
-          </Button>
-        </DialogContent>
-      </Dialog>
+            <DialogHeader className="items-center gap-3 text-center">
+              <DialogTitle className="font-display text-lg font-semibold leading-snug tracking-wide text-primary-font uppercase">
+                All cards finished
+              </DialogTitle>
+              <DialogDescription className="font-body mt-6 text-base leading-relaxed text-primary-font/80">
+                You&apos;ve answered every card in this session.
+              </DialogDescription>
+            </DialogHeader>
+            <Button
+              type="button"
+              className="h-10 w-full rounded-full border-0 bg-primary-card font-display text-sm font-semibold uppercase tracking-wide text-primary-font shadow-none hover:bg-primary-card-hover focus-visible:ring-primary-font/25"
+              onClick={returnToHomeFromComplete}
+            >
+              Return home
+            </Button>
+          </DialogContent>
+        </Dialog>
+      ) : null}
 
       <main className="flex min-h-0 flex-1 flex-col px-4 pb-8 pt-4">
         <Button
@@ -395,14 +397,14 @@ export function HomeExperience() {
             resetGame();
             setView("home");
           }}
-          className="mb-4 h-10 w-fit shrink-0 rounded-full border-0 bg-primary-card px-4 font-display text-sm font-medium uppercase tracking-wide text-primary-font shadow-none hover:bg-primary-card-hover [&_svg]:text-primary-font focus-visible:ring-primary-font/25"
+          className="relative z-20 mb-4 h-10 w-fit shrink-0 rounded-full border-0 bg-primary-card px-4 font-display text-sm font-medium uppercase tracking-wide text-primary-font shadow-none hover:bg-primary-card-hover [&_svg]:text-primary-font focus-visible:ring-primary-font/25"
           aria-label="Go back"
         >
           <MoveLeft className="mr-0.5 size-4 shrink-0" aria-hidden />
           Go back
         </Button>
 
-        <div className="flex min-h-0 flex-1 flex-col items-center justify-center -mt-24">
+        <div className="relative z-0 flex min-h-0 flex-1 flex-col items-center justify-start">
           <div className="flex w-full max-w-[min(100%,660px)] items-center justify-center gap-0 sm:gap-0">
             <Button
               type="button"
