@@ -1,5 +1,16 @@
 This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
 
+## Light theme colors
+
+Light theme palette lives in `app/globals.css` as CSS variables. Do not duplicate these hex values in components; use Tailwind tokens instead.
+
+- **Primary font** `#363636` — `text-primary-font` (or `text-foreground`)
+- **Primary background** `#F5F6F8` — `bg-primary-background` (or `bg-background`)
+- **Primary card background** `#E3E3E3` — `bg-primary-card`
+- **Primary card hover** `#D4D4D4` (same as Tailwind `neutral-300`) — `bg-primary-card-hover`
+
+See `AGENTS.md` for the same rules for contributors and agents.
+
 ## Getting Started
 
 First, run the development server:
