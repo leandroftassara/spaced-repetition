@@ -1,20 +1,23 @@
 import { BadRequestException } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
+import { CreateQuestionsBodyDto } from './dto/create-questions.dto';
 import { QuestionsController } from './questions.controller';
 import { QuestionsService } from './questions.service';
 
 describe('QuestionsController', () => {
   let controller: QuestionsController;
   const findAll = jest.fn();
+  const createMany = jest.fn();
 
   beforeEach(async () => {
     findAll.mockReset();
+    createMany.mockReset();
     const module: TestingModule = await Test.createTestingModule({
       controllers: [QuestionsController],
       providers: [
         {
           provide: QuestionsService,
-          useValue: { findAll },
+          useValue: { findAll, createMany },
         },
       ],
     }).compile();
@@ -47,5 +50,24 @@ describe('QuestionsController', () => {
   it('findAll with invalid category_id throws BadRequestException', () => {
     expect(() => controller.findAll('not-valid')).toThrow(BadRequestException);
     expect(findAll).not.toHaveBeenCalled();
+  });
+
+  it('create passes questions array to service', async () => {
+    const oid = '507f1f77bcf86cd799439011';
+    const body: CreateQuestionsBodyDto = {
+      questions: [
+        {
+          category_id: oid,
+          question: 'Q?',
+          answers: ['a', 'b', 'c', 'd'],
+          correctAnswerIndex: 0,
+        },
+      ],
+    };
+    const result = { insertedCount: 1, ids: [oid] };
+    createMany.mockResolvedValue(result);
+
+    await expect(controller.create(body)).resolves.toEqual(result);
+    expect(createMany).toHaveBeenCalledWith(body.questions);
   });
 });
