@@ -13,24 +13,67 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { getApiBase } from "@/lib/api-base";
 import { cn } from "@/lib/utils";
-import { type FlashQuestion, FLASH_CARDS_MOCK } from "@/lib/flash-cards-mock";
+import { type FlashQuestion } from "@/lib/flash-cards-mock";
 
-const actions = [
-  "Vocabulary",
-  "Mixed",
-  "Expressions",
-  "Prepositions",
-  "Pronounce",
-  "Phrasal Verbs",
-] as const;
+type ApiCategory = {
+  _id: string;
+  name: string;
+  available: boolean;
+};
 
-const disabledActions = new Set<string>([
-  "Expressions",
-  "Prepositions",
-  "Pronounce",
-  "Phrasal Verbs",
-]);
+type ApiQuestion = {
+  _id: string;
+  category_id: string;
+  question: string;
+  answers: string[];
+  correctAnswerIndex: number;
+};
+
+type HomeRow =
+  | { kind: "mixed"; label: string }
+  | { kind: "category"; id: string; label: string; disabled: boolean };
+
+function buildHomeRows(cats: ApiCategory[]): HomeRow[] {
+  const mixed: HomeRow = { kind: "mixed", label: "Mixed" };
+  if (cats.length === 0) return [mixed];
+  const first = cats[0];
+  return [
+    {
+      kind: "category",
+      id: first._id,
+      label: first.name,
+      disabled: !first.available,
+    },
+    mixed,
+    ...cats.slice(1).map(
+      (c): HomeRow => ({
+        kind: "category",
+        id: c._id,
+        label: c.name,
+        disabled: !c.available,
+      }),
+    ),
+  ];
+}
+
+function apiQuestionToFlash(
+  q: ApiQuestion,
+  nameById: Map<string, string>,
+): FlashQuestion {
+  const opts = q.answers;
+  if (opts.length !== 4) {
+    throw new Error("Expected 4 answers per question");
+  }
+  return {
+    id: String(q._id),
+    category: nameById.get(q.category_id) ?? "—",
+    prompt: q.question,
+    correctIndex: q.correctAnswerIndex as FlashQuestion["correctIndex"],
+    options: opts as FlashQuestion["options"],
+  };
+}
 
 type Slot = "left" | "center" | "right";
 
@@ -207,7 +250,7 @@ function FlashCardFace({
           {question.prompt}
         </p>
         <div
-          key={question.id}
+          key={`${slot}-${question.id}`}
           className={cn("mt-5", isCenter && "animate-flash-card-swap")}
         >
           <AnswerOptions
@@ -225,6 +268,18 @@ function FlashCardFace({
 
 export function HomeExperience() {
   const [view, setView] = React.useState<"home" | "game">("home");
+  const [selectedMode, setSelectedMode] = React.useState<
+    null | "mixed" | { categoryId: string }
+  >(null);
+  const [categories, setCategories] = React.useState<ApiCategory[]>([]);
+  const [categoriesLoading, setCategoriesLoading] = React.useState(true);
+  const [categoriesError, setCategoriesError] = React.useState<string | null>(
+    null,
+  );
+  const [deck, setDeck] = React.useState<FlashQuestion[]>([]);
+  const [gameLoading, setGameLoading] = React.useState(false);
+  const [gameError, setGameError] = React.useState<string | null>(null);
+
   const [currentIndex, setCurrentIndex] = React.useState(0);
   const [selectedByCard, setSelectedByCard] = React.useState<
     Record<string, number | null>
@@ -238,6 +293,75 @@ export function HomeExperience() {
     0,
   );
 
+  React.useEffect(() => {
+    let cancelled = false;
+    fetch(`${getApiBase()}/categories`)
+      .then((r) => {
+        if (!r.ok) throw new Error("Failed to load categories");
+        return r.json() as Promise<ApiCategory[]>;
+      })
+      .then((data) => {
+        if (!cancelled) setCategories(data);
+      })
+      .catch((e: Error) => {
+        if (!cancelled) setCategoriesError(e.message);
+      })
+      .finally(() => {
+        if (!cancelled) setCategoriesLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const categoriesRef = React.useRef(categories);
+  React.useEffect(() => {
+    categoriesRef.current = categories;
+  }, [categories]);
+
+  React.useEffect(() => {
+    if (view !== "game" || selectedMode === null) return;
+    let cancelled = false;
+    const base = getApiBase();
+    const url =
+      selectedMode === "mixed"
+        ? `${base}/questions`
+        : `${base}/questions?category_id=${encodeURIComponent(selectedMode.categoryId)}`;
+    fetch(url)
+      .then((r) => {
+        if (!r.ok) throw new Error("Failed to load questions");
+        return r.json() as Promise<ApiQuestion[]>;
+      })
+      .then((data) => {
+        if (cancelled) return;
+        const nameById = new Map(
+          categoriesRef.current.map((c) => [c._id, c.name] as const),
+        );
+        try {
+          const mapped = data.map((q) => apiQuestionToFlash(q, nameById));
+          setDeck(mapped);
+        } catch (e) {
+          setGameError(
+            e instanceof Error ? e.message : "Invalid question data",
+          );
+        }
+      })
+      .catch((e: Error) => {
+        if (!cancelled) setGameError(e.message);
+      })
+      .finally(() => {
+        if (!cancelled) setGameLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [view, selectedMode]);
+
+  const homeRows = React.useMemo(
+    () => buildHomeRows(categories),
+    [categories],
+  );
+
   const resetGame = React.useCallback(() => {
     if (completeDialogTimerRef.current != null) {
       clearTimeout(completeDialogTimerRef.current);
@@ -247,24 +371,33 @@ export function HomeExperience() {
     setCarouselDirection(0);
     setSelectedByCard({});
     setCurrentIndex(0);
+    setDeck([]);
+    setGameError(null);
+    setGameLoading(false);
+    setSelectedMode(null);
   }, []);
 
-  const n = FLASH_CARDS_MOCK.length;
-  const leftIdx = (currentIndex - 1 + n) % n;
-  const rightIdx = (currentIndex + 1) % n;
-  const centerQuestion = FLASH_CARDS_MOCK[currentIndex];
-  const leftQuestion = FLASH_CARDS_MOCK[leftIdx];
-  const rightQuestion = FLASH_CARDS_MOCK[rightIdx];
-  const selectedOption = selectedByCard[centerQuestion.id] ?? null;
-  const leftSelected = selectedByCard[leftQuestion.id] ?? null;
-  const rightSelected = selectedByCard[rightQuestion.id] ?? null;
+  const n = deck.length;
+  const leftIdx = n > 0 ? (currentIndex - 1 + n) % n : 0;
+  const rightIdx = n > 0 ? (currentIndex + 1) % n : 0;
+  const centerQuestion = deck[currentIndex];
+  const leftQuestion = deck[leftIdx];
+  const rightQuestion = deck[rightIdx];
+  const selectedOption = centerQuestion
+    ? (selectedByCard[centerQuestion.id] ?? null)
+    : null;
+  const leftSelected = leftQuestion
+    ? (selectedByCard[leftQuestion.id] ?? null)
+    : null;
+  const rightSelected = rightQuestion
+    ? (selectedByCard[rightQuestion.id] ?? null)
+    : null;
 
   const canGoPrev = currentIndex > 0;
   const canGoNext = selectedOption !== null;
 
-  const deckComplete = FLASH_CARDS_MOCK.every(
-    (q) => selectedByCard[q.id] != null,
-  );
+  const deckComplete =
+    n > 0 && deck.every((q) => selectedByCard[q.id] != null);
 
   const goPrev = React.useCallback(() => {
     setCarouselDirection(-1);
@@ -274,8 +407,6 @@ export function HomeExperience() {
   const goNext = React.useCallback(() => {
     if (selectedOption == null) return;
     if (deckComplete) {
-      // Only skip the wait if the debounced timer is still pending (never open
-      // on the same interaction as the last answer when ref is still unset).
       if (completeDialogTimerRef.current == null) return;
       clearTimeout(completeDialogTimerRef.current);
       completeDialogTimerRef.current = null;
@@ -288,10 +419,11 @@ export function HomeExperience() {
 
   const setSelectedForCurrent = React.useCallback(
     (optionIndex: number) => {
+      if (!centerQuestion) return;
       setSelectedByCard((prev) => {
         if (prev[centerQuestion.id] != null) return prev;
         const next = { ...prev, [centerQuestion.id]: optionIndex };
-        const allDone = FLASH_CARDS_MOCK.every((q) => next[q.id] != null);
+        const allDone = deck.every((q) => next[q.id] != null);
         if (allDone) {
           if (completeDialogTimerRef.current != null) {
             clearTimeout(completeDialogTimerRef.current);
@@ -304,10 +436,15 @@ export function HomeExperience() {
         return next;
       });
     },
-    [centerQuestion.id],
+    [centerQuestion, deck],
   );
 
   const returnToHomeFromComplete = React.useCallback(() => {
+    resetGame();
+    setView("home");
+  }, [resetGame]);
+
+  const goBackToHome = React.useCallback(() => {
     resetGame();
     setView("home");
   }, [resetGame]);
@@ -332,37 +469,71 @@ export function HomeExperience() {
           <p className="font-body mt-16 max-w-xl text-lg text-primary-font sm:text-xl">
             What do you want to work on today?
           </p>
+          {categoriesError ? (
+            <p className="font-body mt-6 text-sm text-destructive">
+              {categoriesError}
+            </p>
+          ) : null}
           <div className="mt-12 grid w-full max-w-2xl grid-cols-1 gap-3 sm:grid-cols-3 sm:gap-4">
-            {actions.map((label) => {
-              const isDisabled = disabledActions.has(label);
-              return (
-                <Button
-                  key={label}
-                  type="button"
-                  variant="ghost"
-                  disabled={isDisabled}
-                  onClick={() => {
-                    if (!isDisabled) {
+            {categoriesLoading ? (
+              <p className="col-span-full font-body text-sm text-primary-font/80">
+                Loading categories…
+              </p>
+            ) : (
+              homeRows.map((row) => {
+                if (row.kind === "mixed") {
+                  return (
+                    <Button
+                      key="mixed"
+                      type="button"
+                      variant="ghost"
+                      onClick={() => {
+                        resetGame();
+                        setSelectedMode("mixed");
+                        setGameLoading(true);
+                        setGameError(null);
+                        setView("game");
+                      }}
+                      className={cn(
+                        "h-12 w-full rounded-full border-0 bg-primary-card font-body text-base font-medium text-primary-font shadow-none hover:bg-primary-card-hover hover:text-primary-font focus-visible:ring-primary-font/25",
+                        "disabled:pointer-events-auto disabled:cursor-not-allowed disabled:bg-primary-card/50 disabled:text-primary-font/45 disabled:opacity-100 disabled:hover:bg-primary-card/50 disabled:hover:text-primary-font/45",
+                      )}
+                    >
+                      {row.label}
+                    </Button>
+                  );
+                }
+                return (
+                  <Button
+                    key={row.id}
+                    type="button"
+                    variant="ghost"
+                    disabled={row.disabled}
+                    onClick={() => {
+                      if (row.disabled) return;
                       resetGame();
+                      setSelectedMode({ categoryId: row.id });
+                      setGameLoading(true);
+                      setGameError(null);
                       setView("game");
-                    }
-                  }}
-                  className={cn(
-                    "h-12 w-full rounded-full border-0 bg-primary-card font-body text-base font-medium text-primary-font shadow-none hover:bg-primary-card-hover hover:text-primary-font focus-visible:ring-primary-font/25",
-                    "disabled:pointer-events-auto disabled:cursor-not-allowed disabled:bg-primary-card/50 disabled:text-primary-font/45 disabled:opacity-100 disabled:hover:bg-primary-card/50 disabled:hover:text-primary-font/45",
-                  )}
-                >
-                  {label}
-                </Button>
-              );
-            })}
+                    }}
+                    className={cn(
+                      "h-12 w-full rounded-full border-0 bg-primary-card font-body text-base font-medium text-primary-font shadow-none hover:bg-primary-card-hover hover:text-primary-font focus-visible:ring-primary-font/25",
+                      "disabled:pointer-events-auto disabled:cursor-not-allowed disabled:bg-primary-card/50 disabled:text-primary-font/45 disabled:opacity-100 disabled:hover:bg-primary-card/50 disabled:hover:text-primary-font/45",
+                    )}
+                  >
+                    {row.label}
+                  </Button>
+                );
+              })
+            )}
           </div>
         </div>
       </main>
     );
   }
 
-  return (
+  const gameShell = (children: React.ReactNode) => (
     <>
       {completeDialogOpen ? (
         <Dialog open>
@@ -393,35 +564,120 @@ export function HomeExperience() {
         <Button
           type="button"
           variant="ghost"
-          onClick={() => {
-            resetGame();
-            setView("home");
-          }}
+          onClick={goBackToHome}
           className="relative z-20 mb-4 h-10 w-fit shrink-0 rounded-full border-0 bg-primary-card px-4 font-display text-sm font-medium uppercase tracking-wide text-primary-font shadow-none hover:bg-primary-card-hover [&_svg]:text-primary-font focus-visible:ring-primary-font/25"
           aria-label="Go back"
         >
           <MoveLeft className="mr-0.5 size-4 shrink-0" aria-hidden />
           Go back
         </Button>
+        {children}
+      </main>
+    </>
+  );
 
-        <div className="relative z-0 flex min-h-0 flex-1 flex-col items-center justify-start">
-          <div className="flex w-full max-w-[min(100%,660px)] items-center justify-center gap-0 sm:gap-0">
-            <Button
-              type="button"
-              variant="secondary"
-              size="icon-lg"
-              aria-label={canGoPrev ? "Previous card" : "Already on first card"}
-              disabled={!canGoPrev}
-              onClick={goPrev}
-              className="size-11 shrink-0 rounded-full border-0 bg-primary-font text-primary-background shadow-md hover:bg-primary-font/90 disabled:pointer-events-none disabled:opacity-40 disabled:hover:bg-primary-font [&_svg]:text-primary-background"
-            >
-              <ChevronLeft className="size-5" aria-hidden />
-            </Button>
+  if (gameLoading) {
+    return gameShell(
+      <div className="flex flex-1 flex-col items-center justify-center gap-4">
+        <p className="font-body text-primary-font">Loading questions…</p>
+      </div>,
+    );
+  }
 
-            <div className="relative h-[min(70vh,520px)] w-full min-w-0 flex-1 perspective-[1000px]">
+  if (selectedMode === null) {
+    return gameShell(
+      <div className="flex flex-1 flex-col items-center justify-center gap-4">
+        <p className="font-body text-primary-font">Loading questions…</p>
+      </div>,
+    );
+  }
+
+  if (gameError) {
+    return gameShell(
+      <div className="flex flex-1 flex-col items-center justify-center gap-4 px-4 text-center">
+        <p className="font-body text-destructive">{gameError}</p>
+      </div>,
+    );
+  }
+
+  if (n === 0) {
+    return gameShell(
+      <div className="flex flex-1 flex-col items-center justify-center gap-4 px-4 text-center">
+        <p className="font-body text-primary-font">No questions in this set.</p>
+      </div>,
+    );
+  }
+
+  if (!centerQuestion) {
+    return gameShell(
+      <div className="flex flex-1 flex-col items-center justify-center gap-4">
+        <p className="font-body text-primary-font">Loading questions…</p>
+      </div>,
+    );
+  }
+
+  const carousel = (
+    <div className="relative z-0 flex min-h-0 flex-1 flex-col items-center justify-start">
+      <div className="flex w-full max-w-[min(100%,660px)] items-center justify-center gap-0 sm:gap-0">
+        <Button
+          type="button"
+          variant="secondary"
+          size="icon-lg"
+          aria-label={canGoPrev ? "Previous card" : "Already on first card"}
+          disabled={!canGoPrev}
+          onClick={goPrev}
+          className="size-11 shrink-0 rounded-full border-0 bg-primary-font text-primary-background shadow-md hover:bg-primary-font/90 disabled:pointer-events-none disabled:opacity-40 disabled:hover:bg-primary-font [&_svg]:text-primary-background"
+        >
+          <ChevronLeft className="size-5" aria-hidden />
+        </Button>
+
+        <div className="relative h-[min(70vh,520px)] w-full min-w-0 flex-1 perspective-[1000px]">
+          {n === 1 ? (
+            <div className="relative flex h-full w-full items-center justify-center">
+              <div className="relative w-full" style={slotWrapperStyle("center")}>
+                <motion.div
+                  key={`center-${centerQuestion.id}`}
+                  className="w-full"
+                  initial={
+                    carouselDirection === 0
+                      ? false
+                      : {
+                          x: carouselDirection * 88,
+                          opacity: 0.62,
+                          rotateY: carouselDirection * -18,
+                          scale: 0.93,
+                        }
+                  }
+                  animate={{
+                    x: 0,
+                    opacity: 1,
+                    rotateY: 0,
+                    scale: 1,
+                  }}
+                  transition={{
+                    type: "spring",
+                    stiffness: 280,
+                    damping: 32,
+                    mass: 0.85,
+                  }}
+                  style={{ transformStyle: "preserve-3d" }}
+                >
+                  <FlashCardFace
+                    question={centerQuestion}
+                    slot="center"
+                    positioned={false}
+                    selectedOption={selectedOption}
+                    onSelectOption={setSelectedForCurrent}
+                  />
+                </motion.div>
+              </div>
+            </div>
+          ) : (
+            leftQuestion &&
+            rightQuestion && (
               <div className="relative h-full w-full">
                 <motion.div
-                  key={leftQuestion.id}
+                  key={`left-${leftIdx}-${leftQuestion.id}`}
                   style={slotWrapperStyle("left")}
                   initial={{ opacity: 0.35, filter: "blur(4px)" }}
                   animate={{ opacity: 0.55, filter: "blur(2px)" }}
@@ -441,7 +697,7 @@ export function HomeExperience() {
                 </motion.div>
                 <div style={slotWrapperStyle("center")}>
                   <motion.div
-                    key={currentIndex}
+                    key={`center-${currentIndex}-${centerQuestion.id}`}
                     className="w-full"
                     initial={
                       carouselDirection === 0
@@ -477,7 +733,7 @@ export function HomeExperience() {
                   </motion.div>
                 </div>
                 <motion.div
-                  key={rightQuestion.id}
+                  key={`right-${rightIdx}-${rightQuestion.id}`}
                   style={slotWrapperStyle("right")}
                   initial={{ opacity: 0.35, filter: "blur(4px)" }}
                   animate={{ opacity: 0.55, filter: "blur(2px)" }}
@@ -496,26 +752,28 @@ export function HomeExperience() {
                   />
                 </motion.div>
               </div>
-            </div>
-
-            <Button
-              type="button"
-              variant="secondary"
-              size="icon-lg"
-              aria-label={
-                canGoNext
-                  ? "Next card"
-                  : "Answer the question before continuing"
-              }
-              disabled={!canGoNext}
-              onClick={goNext}
-              className="size-11 shrink-0 rounded-full border-0 bg-primary-font text-primary-background shadow-md hover:bg-primary-font/90 disabled:pointer-events-none disabled:opacity-40 disabled:hover:bg-primary-font [&_svg]:text-primary-background"
-            >
-              <ChevronRight className="size-5" aria-hidden />
-            </Button>
-          </div>
+            )
+          )}
         </div>
-      </main>
-    </>
+
+        <Button
+          type="button"
+          variant="secondary"
+          size="icon-lg"
+          aria-label={
+            canGoNext
+              ? "Next card"
+              : "Answer the question before continuing"
+          }
+          disabled={!canGoNext}
+          onClick={goNext}
+          className="size-11 shrink-0 rounded-full border-0 bg-primary-font text-primary-background shadow-md hover:bg-primary-font/90 disabled:pointer-events-none disabled:opacity-40 disabled:hover:bg-primary-font [&_svg]:text-primary-background"
+        >
+          <ChevronRight className="size-5" aria-hidden />
+        </Button>
+      </div>
+    </div>
   );
+
+  return gameShell(carousel);
 }
