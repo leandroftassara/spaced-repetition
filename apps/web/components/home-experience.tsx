@@ -35,47 +35,116 @@ type HomeRow =
   | { kind: "mixed"; label: string }
   | { kind: "category"; id: string; label: string; disabled: boolean };
 
+type Slot = "left" | "center" | "right";
+
+/** Category id for “Vocabulary” in production data. */
+const VOCABULARY_CATEGORY_ID = "69e414e0012116c9a31c57a8";
+
 function buildHomeRows(cats: ApiCategory[]): HomeRow[] {
   const mixed: HomeRow = { kind: "mixed", label: "Mixed" };
-  if (cats.length === 0) return [mixed];
-  const first = cats[0];
-  return [
-    {
+  const vocab = cats.find((c) => c._id === VOCABULARY_CATEGORY_ID);
+  const sentences = cats.find(
+    (c) => c.name.trim().toLowerCase() === "sentences",
+  );
+  const rows: HomeRow[] = [];
+  if (vocab) {
+    rows.push({
       kind: "category",
-      id: first._id,
-      label: first.name,
-      disabled: !first.available,
-    },
-    mixed,
-    ...cats.slice(1).map(
-      (c): HomeRow => ({
-        kind: "category",
-        id: c._id,
-        label: c.name,
-        disabled: !c.available,
-      }),
-    ),
+      id: vocab._id,
+      label: vocab.name,
+      disabled: !vocab.available,
+    });
+  }
+  rows.push(mixed);
+  if (sentences) {
+    rows.push({
+      kind: "category",
+      id: sentences._id,
+      label: sentences.name,
+      disabled: !sentences.available,
+    });
+  }
+  return rows;
+}
+
+function isVocabularyQuestion(q: FlashQuestion): boolean {
+  return q.categoryId === VOCABULARY_CATEGORY_ID;
+}
+
+function flashOptionsRevealProps(
+  question: FlashQuestion,
+  slot: Slot,
+  revealedMap: Record<string, boolean>,
+  reveal: (cardId: string) => void,
+) {
+  const optionsRevealed = Boolean(revealedMap[question.id]);
+  return {
+    optionsRevealed,
+    onRevealOptions:
+      slot === "center" &&
+      isVocabularyQuestion(question) &&
+      !optionsRevealed
+        ? () => reveal(question.id)
+        : undefined,
+  };
+}
+
+/** Fisher–Yates shuffle of 0..n-1; each call returns a new random order. */
+function shuffledIndices(n: number): number[] {
+  const order = Array.from({ length: n }, (_, i) => i);
+  for (let i = n - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    const t = order[i]!;
+    order[i] = order[j]!;
+    order[j] = t;
+  }
+  return order;
+}
+
+/**
+ * Random display order for options. `correctAnswerIndex` is the index in the
+ * stored `answers` array; returned `correctIndex` is the index in the shuffled
+ * `options` tuple shown to the user.
+ */
+function shuffleOptionsForDisplay(
+  answers: string[],
+  correctAnswerIndex: number,
+): { options: [string, string, string, string]; correctIndex: 0 | 1 | 2 | 3 } {
+  const n = answers.length;
+  if (n !== 4) {
+    throw new Error("Expected 4 answers per question");
+  }
+  const order = shuffledIndices(n);
+  const options = order.map((from) => answers[from]!) as [
+    string,
+    string,
+    string,
+    string,
   ];
+  const correctIndex = order.indexOf(correctAnswerIndex);
+  if (correctIndex < 0) {
+    throw new Error("correctAnswerIndex out of range for answers");
+  }
+  return { options, correctIndex: correctIndex as 0 | 1 | 2 | 3 };
 }
 
 function apiQuestionToFlash(
   q: ApiQuestion,
   nameById: Map<string, string>,
 ): FlashQuestion {
-  const opts = q.answers;
-  if (opts.length !== 4) {
-    throw new Error("Expected 4 answers per question");
-  }
+  const { options, correctIndex } = shuffleOptionsForDisplay(
+    q.answers,
+    q.correctAnswerIndex,
+  );
   return {
     id: String(q._id),
+    categoryId: String(q.category_id),
     category: nameById.get(q.category_id) ?? "—",
     prompt: q.question,
-    correctIndex: q.correctAnswerIndex as FlashQuestion["correctIndex"],
-    options: opts as FlashQuestion["options"],
+    correctIndex,
+    options,
   };
 }
-
-type Slot = "left" | "center" | "right";
 
 function slotWrapperStyle(slot: Slot): React.CSSProperties {
   const base: React.CSSProperties = {
@@ -219,16 +288,23 @@ function FlashCardFace({
   slot,
   selectedOption,
   onSelectOption,
+  optionsRevealed,
+  onRevealOptions,
   positioned = true,
 }: {
   question: FlashQuestion;
   slot: Slot;
   selectedOption: number | null;
   onSelectOption: (index: number) => void;
+  /** Vocabulary: choices stay hidden until the user taps reveal (center card only). */
+  optionsRevealed: boolean;
+  onRevealOptions?: () => void;
   /** When false, parent handles absolute 3D placement (e.g. motion wrappers). */
   positioned?: boolean;
 }) {
   const isCenter = slot === "center";
+  const blindChoicesFirst = isVocabularyQuestion(question);
+  const showChoices = !blindChoicesFirst || optionsRevealed;
 
   return (
     <Card
@@ -253,13 +329,24 @@ function FlashCardFace({
           key={`${slot}-${question.id}`}
           className={cn("mt-5", isCenter && "animate-flash-card-swap")}
         >
-          <AnswerOptions
-            question={question}
-            selectedIndex={selectedOption}
-            onSelect={onSelectOption}
-            disabled={false}
-            interactive={isCenter}
-          />
+          {showChoices ? (
+            <AnswerOptions
+              question={question}
+              selectedIndex={selectedOption}
+              onSelect={onSelectOption}
+              disabled={false}
+              interactive={isCenter}
+            />
+          ) : isCenter && onRevealOptions ? (
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={onRevealOptions}
+              className="h-12 w-full rounded-full border-0 bg-primary-card-hover/90 font-body text-base font-medium text-primary-font shadow-none hover:bg-primary-card-hover hover:text-primary-font focus-visible:ring-2 focus-visible:ring-primary-font/25 focus-visible:outline-none"
+            >
+              Show answer choices
+            </Button>
+          ) : null}
         </div>
       </CardContent>
     </Card>
@@ -283,6 +370,9 @@ export function HomeExperience() {
   const [currentIndex, setCurrentIndex] = React.useState(0);
   const [selectedByCard, setSelectedByCard] = React.useState<
     Record<string, number | null>
+  >({});
+  const [optionsRevealedByCard, setOptionsRevealedByCard] = React.useState<
+    Record<string, boolean>
   >({});
   const [completeDialogOpen, setCompleteDialogOpen] = React.useState(false);
   const completeDialogTimerRef = React.useRef<ReturnType<
@@ -370,6 +460,7 @@ export function HomeExperience() {
     setCompleteDialogOpen(false);
     setCarouselDirection(0);
     setSelectedByCard({});
+    setOptionsRevealedByCard({});
     setCurrentIndex(0);
     setDeck([]);
     setGameError(null);
@@ -438,6 +529,10 @@ export function HomeExperience() {
     },
     [centerQuestion, deck],
   );
+
+  const revealOptionsForCard = React.useCallback((cardId: string) => {
+    setOptionsRevealedByCard((prev) => ({ ...prev, [cardId]: true }));
+  }, []);
 
   const returnToHomeFromComplete = React.useCallback(() => {
     resetGame();
@@ -668,6 +763,12 @@ export function HomeExperience() {
                     positioned={false}
                     selectedOption={selectedOption}
                     onSelectOption={setSelectedForCurrent}
+                    {...flashOptionsRevealProps(
+                      centerQuestion,
+                      "center",
+                      optionsRevealedByCard,
+                      revealOptionsForCard,
+                    )}
                   />
                 </motion.div>
               </div>
@@ -693,6 +794,12 @@ export function HomeExperience() {
                     positioned={false}
                     selectedOption={leftSelected}
                     onSelectOption={() => {}}
+                    {...flashOptionsRevealProps(
+                      leftQuestion,
+                      "left",
+                      optionsRevealedByCard,
+                      revealOptionsForCard,
+                    )}
                   />
                 </motion.div>
                 <div style={slotWrapperStyle("center")}>
@@ -729,6 +836,12 @@ export function HomeExperience() {
                       positioned={false}
                       selectedOption={selectedOption}
                       onSelectOption={setSelectedForCurrent}
+                      {...flashOptionsRevealProps(
+                        centerQuestion,
+                        "center",
+                        optionsRevealedByCard,
+                        revealOptionsForCard,
+                      )}
                     />
                   </motion.div>
                 </div>
@@ -749,6 +862,12 @@ export function HomeExperience() {
                     positioned={false}
                     selectedOption={rightSelected}
                     onSelectOption={() => {}}
+                    {...flashOptionsRevealProps(
+                      rightQuestion,
+                      "right",
+                      optionsRevealedByCard,
+                      revealOptionsForCard,
+                    )}
                   />
                 </motion.div>
               </div>

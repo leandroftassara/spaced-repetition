@@ -1,5 +1,7 @@
 export type FlashQuestion = {
   id: string;
+  /** API category ObjectId; used for mode-specific UI (e.g. vocabulary). */
+  categoryId?: string;
   category: string;
   prompt: string;
   /** Index 0–3 of the correct option in `options`. */

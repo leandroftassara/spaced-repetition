@@ -13,16 +13,25 @@ export class QuestionsService {
   ) {}
 
   findAll(categoryId?: string) {
+    const SAMPLE_SIZE = 500;
+
     if (!categoryId) {
-      return this.questionModel.find({}).lean().exec();
+      return this.questionModel
+        .aggregate([{ $sample: { size: SAMPLE_SIZE } }])
+        .exec();
     }
+
     const oid = new Types.ObjectId(categoryId);
     // Match ObjectId-stored refs (normal) and legacy string-stored category_id.
     return this.questionModel
-      .find({
-        $or: [{ category_id: oid }, { category_id: categoryId }],
-      })
-      .lean()
+      .aggregate([
+        {
+          $match: {
+            $or: [{ category_id: oid }, { category_id: categoryId }],
+          },
+        },
+        { $sample: { size: SAMPLE_SIZE } },
+      ])
       .exec();
   }
 
