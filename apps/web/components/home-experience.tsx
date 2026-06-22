@@ -15,7 +15,11 @@ import {
 } from "@/components/ui/dialog";
 import { getApiBase } from "@/lib/api-base";
 import { cn } from "@/lib/utils";
-import { type FlashQuestion } from "@/lib/flash-cards-mock";
+import {
+  type FlashQuestion,
+  type MultipleChoiceQuestion,
+  type VocabAnswer,
+} from "@/lib/flash-cards-mock";
 
 type ApiCategory = {
   _id: string;
@@ -27,8 +31,9 @@ type ApiQuestion = {
   _id: string;
   category_id: string;
   question: string;
-  answers: string[];
-  correctAnswerIndex: number;
+  answers: string[] | { value: string; explanation?: string }[];
+  correctAnswerIndex?: number;
+  example?: string;
 };
 
 type HomeRow =
@@ -37,38 +42,15 @@ type HomeRow =
 
 type Slot = "left" | "center" | "right";
 
-/** Category id for “Vocabulary” in production data. */
-const VOCABULARY_CATEGORY_ID = "69e414e0012116c9a31c57a8";
-
 function buildHomeRows(cats: ApiCategory[]): HomeRow[] {
-  const mixed: HomeRow = { kind: "mixed", label: "Mixed" };
-  const vocab = cats.find((c) => c._id === VOCABULARY_CATEGORY_ID);
-  const sentences = cats.find(
-    (c) => c.name.trim().toLowerCase() === "sentences",
-  );
-  const rows: HomeRow[] = [];
-  if (vocab) {
-    rows.push({
-      kind: "category",
-      id: vocab._id,
-      label: vocab.name,
-      disabled: !vocab.available,
-    });
-  }
-  rows.push(mixed);
-  if (sentences) {
-    rows.push({
-      kind: "category",
-      id: sentences._id,
-      label: sentences.name,
-      disabled: !sentences.available,
-    });
-  }
+  const rows: HomeRow[] = cats.map((c) => ({
+    kind: "category",
+    id: c._id,
+    label: c.name,
+    disabled: !c.available,
+  }));
+  rows.push({ kind: "mixed", label: "Mixed" });
   return rows;
-}
-
-function isVocabularyQuestion(q: FlashQuestion): boolean {
-  return q.categoryId === VOCABULARY_CATEGORY_ID;
 }
 
 function flashOptionsRevealProps(
@@ -81,9 +63,7 @@ function flashOptionsRevealProps(
   return {
     optionsRevealed,
     onRevealOptions:
-      slot === "center" &&
-      isVocabularyQuestion(question) &&
-      !optionsRevealed
+      slot === "center" && !optionsRevealed
         ? () => reveal(question.id)
         : undefined,
   };
@@ -101,11 +81,6 @@ function shuffledIndices(n: number): number[] {
   return order;
 }
 
-/**
- * Random display order for options. `correctAnswerIndex` is the index in the
- * stored `answers` array; returned `correctIndex` is the index in the shuffled
- * `options` tuple shown to the user.
- */
 function shuffleOptionsForDisplay(
   answers: string[],
   correctAnswerIndex: number,
@@ -132,15 +107,33 @@ function apiQuestionToFlash(
   q: ApiQuestion,
   nameById: Map<string, string>,
 ): FlashQuestion {
-  const { options, correctIndex } = shuffleOptionsForDisplay(
-    q.answers,
-    q.correctAnswerIndex,
-  );
-  return {
+  const base = {
     id: String(q._id),
     categoryId: String(q.category_id),
     category: nameById.get(q.category_id) ?? "—",
     prompt: q.question,
+  };
+
+  const firstAnswer = q.answers[0];
+  const isVocab =
+    firstAnswer !== undefined && typeof firstAnswer === "object";
+
+  if (isVocab) {
+    return {
+      ...base,
+      kind: "vocabulary",
+      example: q.example,
+      vocabAnswers: q.answers as { value: string; explanation?: string }[],
+    };
+  }
+
+  const { options, correctIndex } = shuffleOptionsForDisplay(
+    q.answers as string[],
+    q.correctAnswerIndex!,
+  );
+  return {
+    ...base,
+    kind: "multiple-choice",
     correctIndex,
     options,
   };
@@ -188,6 +181,28 @@ function slotWrapperStyle(slot: Slot): React.CSSProperties {
   }
 }
 
+function VocabAnswerList({ answers }: { answers: VocabAnswer[] }) {
+  return (
+    <div className="flex flex-col gap-1.5">
+      {answers.map((a, i) => (
+        <div
+          key={i}
+          className="rounded-xl bg-primary-card-hover/90 px-3 py-2.5 animate-answer-correct-pop ring-2 ring-rating-easy/40"
+        >
+          <p className="font-body text-sm font-medium text-primary-font">
+            {a.value}
+          </p>
+          {a.explanation ? (
+            <p className="mt-1 font-body text-xs text-primary-font/65">
+              {a.explanation}
+            </p>
+          ) : null}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function AnswerOptions({
   question,
   selectedIndex,
@@ -195,7 +210,7 @@ function AnswerOptions({
   disabled,
   interactive = true,
 }: {
-  question: FlashQuestion;
+  question: MultipleChoiceQuestion;
   selectedIndex: number | null;
   onSelect: (index: number) => void;
   disabled: boolean;
@@ -296,15 +311,13 @@ function FlashCardFace({
   slot: Slot;
   selectedOption: number | null;
   onSelectOption: (index: number) => void;
-  /** Vocabulary: choices stay hidden until the user taps reveal (center card only). */
   optionsRevealed: boolean;
   onRevealOptions?: () => void;
-  /** When false, parent handles absolute 3D placement (e.g. motion wrappers). */
   positioned?: boolean;
 }) {
   const isCenter = slot === "center";
-  const blindChoicesFirst = isVocabularyQuestion(question);
-  const showChoices = !blindChoicesFirst || optionsRevealed;
+  const revealLabel =
+    question.kind === "vocabulary" ? "Show answers" : "Show answer choices";
 
   return (
     <Card
@@ -325,18 +338,27 @@ function FlashCardFace({
         <p className="font-body text-base leading-snug text-primary-font">
           {question.prompt}
         </p>
+        {question.kind === "vocabulary" && question.example ? (
+          <p className="mt-2 font-mono text-xs italic leading-relaxed text-primary-font/60">
+            {question.example}
+          </p>
+        ) : null}
         <div
           key={`${slot}-${question.id}`}
           className={cn("mt-5", isCenter && "animate-flash-card-swap")}
         >
-          {showChoices ? (
-            <AnswerOptions
-              question={question}
-              selectedIndex={selectedOption}
-              onSelect={onSelectOption}
-              disabled={false}
-              interactive={isCenter}
-            />
+          {optionsRevealed ? (
+            question.kind === "vocabulary" ? (
+              <VocabAnswerList answers={question.vocabAnswers} />
+            ) : (
+              <AnswerOptions
+                question={question}
+                selectedIndex={selectedOption}
+                onSelect={onSelectOption}
+                disabled={false}
+                interactive={isCenter}
+              />
+            )
           ) : isCenter && onRevealOptions ? (
             <Button
               type="button"
@@ -344,7 +366,7 @@ function FlashCardFace({
               onClick={onRevealOptions}
               className="h-12 w-full rounded-full border-0 bg-primary-card-hover/90 font-body text-base font-medium text-primary-font shadow-none hover:bg-primary-card-hover hover:text-primary-font focus-visible:ring-2 focus-visible:ring-primary-font/25 focus-visible:outline-none"
             >
-              Show answer choices
+              {revealLabel}
             </Button>
           ) : null}
         </div>
@@ -425,7 +447,8 @@ export function HomeExperience() {
       .then((data) => {
         if (cancelled) return;
         const nameById = new Map(
-          categoriesRef.current.map((c) => [c._id, c.name] as const),
+          categoriesRef.current.map((c) => [c._id, c.name] as const,
+          ),
         );
         try {
           const mapped = data.map((q) => apiQuestionToFlash(q, nameById));
@@ -468,6 +491,18 @@ export function HomeExperience() {
     setSelectedMode(null);
   }, []);
 
+  const isCardDone = React.useCallback(
+    (
+      q: FlashQuestion,
+      selectedMap: Record<string, number | null>,
+      revealedMap: Record<string, boolean>,
+    ) => {
+      if (q.kind === "vocabulary") return Boolean(revealedMap[q.id]);
+      return selectedMap[q.id] != null;
+    },
+    [],
+  );
+
   const n = deck.length;
   const leftIdx = n > 0 ? (currentIndex - 1 + n) % n : 0;
   const rightIdx = n > 0 ? (currentIndex + 1) % n : 0;
@@ -484,11 +519,18 @@ export function HomeExperience() {
     ? (selectedByCard[rightQuestion.id] ?? null)
     : null;
 
+  const centerVocabRevealed = centerQuestion
+    ? Boolean(optionsRevealedByCard[centerQuestion.id])
+    : false;
+  const centerIsVocab = centerQuestion?.kind === "vocabulary";
   const canGoPrev = currentIndex > 0;
-  const canGoNext = selectedOption !== null;
+  const canGoNext = centerIsVocab
+    ? centerVocabRevealed
+    : selectedOption !== null;
 
   const deckComplete =
-    n > 0 && deck.every((q) => selectedByCard[q.id] != null);
+    n > 0 &&
+    deck.every((q) => isCardDone(q, selectedByCard, optionsRevealedByCard));
 
   const goPrev = React.useCallback(() => {
     setCarouselDirection(-1);
@@ -496,7 +538,7 @@ export function HomeExperience() {
   }, []);
 
   const goNext = React.useCallback(() => {
-    if (selectedOption == null) return;
+    if (!canGoNext) return;
     if (deckComplete) {
       if (completeDialogTimerRef.current == null) return;
       clearTimeout(completeDialogTimerRef.current);
@@ -506,7 +548,7 @@ export function HomeExperience() {
     }
     setCarouselDirection(1);
     setCurrentIndex((i) => (i + 1) % n);
-  }, [deckComplete, n, selectedOption]);
+  }, [deckComplete, n, canGoNext]);
 
   const setSelectedForCurrent = React.useCallback(
     (optionIndex: number) => {
@@ -514,7 +556,9 @@ export function HomeExperience() {
       setSelectedByCard((prev) => {
         if (prev[centerQuestion.id] != null) return prev;
         const next = { ...prev, [centerQuestion.id]: optionIndex };
-        const allDone = deck.every((q) => next[q.id] != null);
+        const allDone = deck.every((q) =>
+          isCardDone(q, next, optionsRevealedByCard),
+        );
         if (allDone) {
           if (completeDialogTimerRef.current != null) {
             clearTimeout(completeDialogTimerRef.current);
@@ -527,12 +571,30 @@ export function HomeExperience() {
         return next;
       });
     },
-    [centerQuestion, deck],
+    [centerQuestion, deck, isCardDone, optionsRevealedByCard],
   );
 
-  const revealOptionsForCard = React.useCallback((cardId: string) => {
-    setOptionsRevealedByCard((prev) => ({ ...prev, [cardId]: true }));
-  }, []);
+  const revealOptionsForCard = React.useCallback(
+    (cardId: string) => {
+      setOptionsRevealedByCard((prev) => {
+        const next = { ...prev, [cardId]: true };
+        const allDone = deck.every((q) =>
+          isCardDone(q, selectedByCard, next),
+        );
+        if (allDone) {
+          if (completeDialogTimerRef.current != null) {
+            clearTimeout(completeDialogTimerRef.current);
+          }
+          completeDialogTimerRef.current = setTimeout(() => {
+            setCompleteDialogOpen(true);
+            completeDialogTimerRef.current = null;
+          }, 10_000);
+        }
+        return next;
+      });
+    },
+    [deck, isCardDone, selectedByCard],
+  );
 
   const returnToHomeFromComplete = React.useCallback(() => {
     resetGame();

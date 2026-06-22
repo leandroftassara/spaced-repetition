@@ -43,6 +43,7 @@ export class QuestionsService {
       question: i.question,
       answers: i.answers,
       correctAnswerIndex: i.correctAnswerIndex,
+      example: i.example,
     }));
     const inserted = await this.questionModel.insertMany(docs);
     return {

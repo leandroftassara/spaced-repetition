@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { HydratedDocument, Types } from 'mongoose';
+import { HydratedDocument, Schema as MongooseSchema, Types } from 'mongoose';
 
 export type QuestionDocument = HydratedDocument<Question>;
 
@@ -11,11 +11,17 @@ export class Question {
   @Prop({ required: true })
   question: string;
 
-  @Prop({ type: [String], required: true })
-  answers: string[];
+  // Each element is either a plain string (multiple-choice) or a
+  // { value, explanation? } object (vocabulary).
+  @Prop({ type: [MongooseSchema.Types.Mixed], required: true })
+  answers: (string | { value: string; explanation?: string })[];
 
-  @Prop({ required: true, min: 0, max: 3 })
-  correctAnswerIndex: number;
+  @Prop({ required: false, min: 0, max: 3 })
+  correctAnswerIndex?: number;
+
+  // Vocabulary only: an example sentence shown below the prompt.
+  @Prop({ required: false })
+  example?: string;
 }
 
 export const QuestionSchema = SchemaFactory.createForClass(Question);

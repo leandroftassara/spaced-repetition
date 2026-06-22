@@ -4,6 +4,7 @@ import {
   ArrayMinSize,
   IsArray,
   IsInt,
+  IsOptional,
   IsString,
   Matches,
   Max,
@@ -13,6 +14,16 @@ import {
   ValidateNested,
 } from 'class-validator';
 import { OBJECT_ID_HEX_PATTERN } from '../parse-category-id';
+
+export class VocabAnswerItemDto {
+  @IsString()
+  @MinLength(1)
+  value: string;
+
+  @IsOptional()
+  @IsString()
+  explanation?: string;
+}
 
 export class CreateQuestionItemDto {
   @Matches(OBJECT_ID_HEX_PATTERN, {
@@ -25,16 +36,26 @@ export class CreateQuestionItemDto {
   @MaxLength(10_000)
   question: string;
 
+  // Either string[] (multiple-choice) or VocabAnswerItemDto[] (vocabulary).
+  // Element-level validation is not enforced here; callers must supply a
+  // consistent format matched to the question's category.
   @IsArray()
-  @ArrayMinSize(4)
-  @ArrayMaxSize(4)
-  @IsString({ each: true })
-  answers: string[];
+  @ArrayMinSize(1)
+  @ArrayMaxSize(100)
+  answers: string[] | VocabAnswerItemDto[];
 
+  // Required for multiple-choice questions; omit for vocabulary questions.
+  @IsOptional()
   @IsInt()
   @Min(0)
   @Max(3)
-  correctAnswerIndex: number;
+  correctAnswerIndex?: number;
+
+  // Vocabulary only: an example sentence shown below the prompt.
+  @IsOptional()
+  @IsString()
+  @MaxLength(10_000)
+  example?: string;
 }
 
 export class CreateQuestionsBodyDto {
